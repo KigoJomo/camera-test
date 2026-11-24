@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera Test</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #181b22; --line: #2a2f3a; --text: #e8eaf0;
+    --muted: #8b93a7; --accent: #6ee7b7; --danger: #f87171;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif;
+  }
+  header { padding: 16px 20px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  #status { color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: 1fr 300px; gap: 16px; padding: 0 20px 20px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+
+  .stage {
+    position: relative; background: #000; border-radius: 12px; overflow: hidden;
+    aspect-ratio: 16 / 9; display: grid; place-items: center;
+  }
+  .stage canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .stage video { display: none; }
+  .placeholder { position: absolute; color: var(--muted); text-align: center; padding: 20px; }
+  .hud {
+    position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; flex-wrap: wrap;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .hud span { background: rgba(0,0,0,.6); padding: 3px 7px; border-radius: 6px; }
+  .rec-dot { color: var(--danger); display: none; }
+  .recording .rec-dot { display: inline; }
+  .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
+  .flash.on { opacity: .8; transition: none; }
+
+  aside { display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .card h2 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+  select, button {
+    width: 100%; font: inherit; color: var(--text); background: #11141a;
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: var(--accent); color: #062b1f; border-color: var(--accent); font-weight: 600; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--text); font-size: 13px; }
+  .check input { width: auto; }
+
+  .effects { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .effects button { padding: 7px 4px; font-size: 12px; }
+  .effects button.active { border-color: var(--accent); color: var(--accent); }
+
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; word-break: break-all; }
+
+  .gallery { grid-column: 1 / -1; }
+  .shots { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; min-height: 40px; }
+  .shots:empty::after { content: "Snapshots and recordings show up here."; color: var(--muted); font-size: 13px; }
+  .shot { flex: 0 0 auto; position: relative; }
+  .shot img, .shot video { height: 110px; border-radius: 8px; display: block; border: 1px solid var(--line); }
+  .shot a {
+    position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,.7); color: #fff;
+    text-decoration: none; font-size: 11px; padding: 3px 7px; border-radius: 6px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Camera Test</h1>
+  <span id="status">Camera is off.</span>
+</header>
+
+<main>
+  <div>
+    <div class="stage" id="stage">
+      <video id="video" playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div class="placeholder" id="placeholder">Press <b>Start camera</b> and allow access when the browser asks.</div>
+      <div class="hud" id="hud" hidden>
+        <span id="hudRes">–</span><span id="hudFps">– fps</span><span class="rec-dot">● REC <b id="recTime">0:00</b></span>
+      </div>
+      <div class="flash" id="flash"></div>
+    </div>
+  </div>
+
+  <aside>
+    <div class="card">
+      <h2>Camera</h2>
+      <button class="primary" id="toggle">Start camera</button>
+      <label for="device">Device</label>
+      <select id="device"><option value="">Start the camera to list devices</option></select>
+      <label for="res">Requested resolution</label>
+      <select id="res">
+        <option value="640x480">640 × 480</option>
+        <option value="1280x720" selected>1280 × 720</option>
+        <option value="1920x1080">1920 × 1080</option>
+        <option value="3840x2160">3840 × 2160 (max)</option>
+      </select>
+      <label class="check"><input type="checkbox" id="mirror" checked> Mirror</label>
+    </div>
+
+    <div class="card">
+      <h2>Effect</h2>
+      <div class="effects" id="effects"></div>
+    </div>
+
+    <div class="card">
+      <h2>Capture</h2>
+      <div class="row">
+        <button id="snap" disabled>Snapshot</button>
+        <button id="rec" disabled>Record</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Stream info</h2>
+      <dl id="info"><dt>State</dt><dd>off</dd></dl>
+    </div>
+  </aside>
+
+  <div class="card gallery">
+    <h2>Captures</h2>
+    <div class="shots" id="shots"></div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const video = $('video'), canvas = $('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
+const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
+
+let stream = null, raf = 0, effect = 'normal';
+let frames = 0, fpsT = performance.now(), recorder = null, recStart = 0;
+
+// ---------- effects ----------
+const thermal = (v) => { // 0..255 -> rgb along black-blue-magenta-orange-yellow-white
+  const stops = [[0,0,0],[30,0,120],[180,0,160],[255,80,0],[255,220,0],[255,255,255]];
+  const t = v / 255 * (stops.length - 1), i = Math.min(Math.floor(t), stops.length - 2), f = t - i;
+  const a = stops[i], b = stops[i + 1];
+  return [a[0] + (b[0]-a[0])*f, a[1] + (b[1]-a[1])*f, a[2] + (b[2]-a[2])*f];
+};
+const THERMAL = Array.from({ length: 256 }, (_, v) => thermal(v));
+const luma = (d, i) => d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114;
+
+const EFFECTS = {
+  normal:  { filter: 'none' },
+  mono:    { filter: 'grayscale(1) contrast(1.15)' },
+  sepia:   { filter: 'sepia(1)' },
+  invert:  { filter: 'invert(1)' },
+  vivid:   { filter: 'saturate(2.2) contrast(1.1)' },
+  blur:    { filter: 'blur(6px)' },
+  pixel:   { draw: drawPixel },
+  thermal: { pixels(d) { for (let i = 0; i < d.length; i += 4) { const c = THERMAL[luma(d, i) | 0]; d[i]=c[0]; d[i+1]=c[1]; d[i+2]=c[2]; } } },
+  edges:   { pixels: sobel },
+  ascii:   { draw: drawAscii },
+  posterize: { pixels(d) { for (let i = 0; i < d.length; i += 4) { d[i]=(d[i]>>6)*85; d[i+1]=(d[i+1]>>6)*85; d[i+2]=(d[i+2]>>6)*85; } } },
+  split:   { draw: drawSplit },
+};
+
+function sobel(d, w, h) {
+  const g = new Float32Array(w * h);
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) g[p] = luma(d, i);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const p = y * w + x;
+    const gx = -g[p-w-1] - 2*g[p-1] - g[p+w-1] + g[p-w+1] + 2*g[p+1] + g[p+w+1];
+    const gy = -g[p-w-1] - 2*g[p-w] - g[p-w+1] + g[p+w-1] + 2*g[p+w] + g[p+w+1];
+    const m = Math.min(255, Math.hypot(gx, gy));
+    const i = p * 4; d[i] = m * 0.4; d[i+1] = m; d[i+2] = m * 0.8;
+  }
+}
+
+function drawSource(c, w, h) {
+  c.save();
+  if ($('mirror').checked) { c.translate(w, 0); c.scale(-1, 1); }
+  c.drawImage(video, 0, 0, w, h);
+  c.restore();
+}
+
+function drawPixel(w, h) {
+  const s = 14, sw = Math.ceil(w / s), sh = Math.ceil(h / s);
+  work.width = sw; work.height = sh;
+  drawSource(wctx, sw, sh);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(work, 0, 0, sw, sh, 0, 0, sw * s, sh * s);
+  ctx.imageSmoothingEnabled = true;
+}
+
+const RAMP = ' .:-=+*#%@';
+function drawAscii(w, h) {
+  const cell = Math.max(8, Math.round(w / 110)), cols = Math.floor(w / cell), rows = Math.floor(h / cell);
+  work.width = cols; work.height = rows;
+  drawSource(wctx, cols, rows);
+  const d = wctx.getImageData(0, 0, cols, rows).data;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+  ctx.font = `${cell}px ui-monospace, Menlo, monospace`; ctx.textBaseline = 'top';
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const i = (y * cols + x) * 4, l = luma(d, i);
+    ctx.fillStyle = `rgb(${d[i]},${d[i+1]},${d[i+2]})`;
+    ctx.fillText(RAMP[Math.min(RAMP.length - 1, (l / 256 * RAMP.length) | 0)], x * cell, y * cell);
+  }
+}
+
+function drawSplit(w, h) { // RGB channel offset
+  drawSource(ctx, w, h);
+  const img = ctx.getImageData(0, 0, w, h), src = new Uint8ClampedArray(img.data), d = img.data;
+  const off = Math.round(w / 90) * 4;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = src[i + off] ?? src[i];
+    d[i + 2] = src[i - off] ?? src[i + 2];
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// ---------- render loop ----------
+function render() {
+  raf = requestAnimationFrame(render);
+  if (video.readyState < 2) return;
+  const w = video.videoWidth, h = video.videoHeight;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const fx = EFFECTS[effect];
+  if (fx.draw) fx.draw(w, h);
+  else {
+    ctx.filter = fx.filter || 'none';
+    drawSource(ctx, w, h);
+    ctx.filter = 'none';
+    if (fx.pixels) {
+      const img = ctx.getImageData(0, 0, w, h);
+      fx.pixels(img.data, w, h);
+      ctx.putImageData(img, 0, 0);
+    }
+  }
+}
+
+function countFrames() { // count real camera frames where supported
+  if (!stream) return;
+  frames++;
+  const now = performance.now();
+  if (now - fpsT >= 1000) {
+    $('hudFps').textContent = `${Math.round(frames * 1000 / (now - fpsT))} fps`;
+    frames = 0; fpsT = now;
+  }
+  if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(countFrames);
+  else requestAnimationFrame(countFrames);
+}
+
+// ---------- camera ----------
+async function start(deviceId) {
+  stop();
+  const [w, h] = $('res').value.split('x').map(Number);
+  const constraints = { audio: false, video: { width: { ideal: w }, height: { ideal: h } } };
+  if (deviceId) constraints.video.deviceId = { exact: deviceId };
+  setStatus('Asking for camera access…');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (e) {
+    stream = null;
+    if (e.name === 'OverconstrainedError') { // retry with nothing but the device
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: deviceId ? { deviceId: { exact: deviceId } } : true });
+      } catch (e2) { e = e2; }
+    }
+    if (!stream) { setStatus(explain(e), true); return; }
+  }
+  video.srcObject = stream;
+  await video.play();
+  $('placeholder').hidden = true; $('hud').hidden = false;
+  $('toggle').textContent = 'Stop camera';
+  $('snap').disabled = $('rec').disabled = false;
+  frames = 0; fpsT = performance.now(); countFrames();
+  render();
+  await listDevices();
+  const track = stream.getVideoTracks()[0];
+  setStatus(`Live: ${track.label || 'camera'}`);
+  video.addEventListener('loadedmetadata', showInfo, { once: true });
+  showInfo();
+  track.addEventListener('ended', () => { stop(); setStatus('Camera disconnected.', true); });
+}
+
+function stop() {
+  if (recorder && recorder.state !== 'inactive') recorder.stop();
+  cancelAnimationFrame(raf);
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = null; video.srcObject = null;
+  $('placeholder').hidden = false; $('hud').hidden = true;
+  $('toggle').textContent = 'Start camera';
+  $('snap').disabled = $('rec').disabled = true;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  $('info').innerHTML = '<dt>State</dt><dd>off</dd>';
+}
+
+function explain(e) {
+  const map = {
+    NotAllowedError: 'Permission denied. Allow camera access in the browser’s site settings and try again.',
+    NotFoundError: 'No camera found.',
+    NotReadableError: 'Camera is busy — another app may be using it.',
+    OverconstrainedError: 'That camera can’t do the requested settings.',
+    SecurityError: 'Camera needs a secure page (https or localhost).',
+  };
+  return map[e.name] || `${e.name}: ${e.message}`;
+}
+
+async function listDevices() {
+  const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+  const current = stream?.getVideoTracks()[0]?.getSettings().deviceId;
+  $('device').innerHTML = devices.map((d, i) =>
+    `<option value="${d.deviceId}" ${d.deviceId === current ? 'selected' : ''}>${d.label || `Camera ${i + 1}`}</option>`).join('');
+}
+
+function showInfo() {
+  if (!stream) return;
+  const track = stream.getVideoTracks()[0];
+  const s = track.getSettings(), caps = track.getCapabilities?.() || {};
+  $('hudRes').textContent = `${s.width}×${s.height}`;
+  const rows = [
+    ['Label', track.label],
+    ['Resolution', `${s.width} × ${s.height}`],
+    ['Frame rate', s.frameRate ? `${Math.round(s.frameRate)} fps` : '–'],
+    ['Aspect', s.aspectRatio ? s.aspectRatio.toFixed(3) : '–'],
+    ['Max res', caps.width ? `${caps.width.max} × ${caps.height.max}` : '–'],
+    ['Max fps', caps.frameRate ? Math.round(caps.frameRate.max) : '–'],
+    ['Facing', s.facingMode || '–'],
+    ['Resize', s.resizeMode || '–'],
+  ];
+  $('info').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${String(v).replace(/</g, '&lt;')}</dd>`).join('');
+}
+
+function setStatus(msg, bad) { $('status').textContent = msg; $('status').style.color = bad ? 'var(--danger)' : ''; }
+
+// ---------- capture ----------
+function addCapture(url, kind, name) {
+  const el = document.createElement('div'); el.className = 'shot';
+  el.innerHTML = kind === 'img'
+    ? `<img src="${url}" alt="snapshot">`
+    : `<video src="${url}" controls muted loop></video>`;
+  const a = document.createElement('a'); a.href = url; a.download = name; a.textContent = 'Save';
+  el.append(a); $('shots').prepend(el);
+}
+
+const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+$('snap').onclick = () => {
+  canvas.toBlob((b) => addCapture(URL.createObjectURL(b), 'img', `snapshot-${stamp()}.png`), 'image/png');
+  const f = $('flash'); f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on')));
+};
+
+$('rec').onclick = () => {
+  if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+  const type = ['video/webm;codecs=vp9', 'video/webm', 'video/mp4'].find((t) => MediaRecorder.isTypeSupported(t));
+  const chunks = [];
+  recorder = new MediaRecorder(canvas.captureStream(30), type ? { mimeType: type } : undefined);
+  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  recorder.onstop = () => {
+    $('stage').classList.remove('recording'); $('rec').textContent = 'Record';
+    clearInterval(recorder._timer);
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    addCapture(URL.createObjectURL(blob), 'video', `clip-${stamp()}.${blob.type.includes('mp4') ? 'mp4' : 'webm'}`);
+  };
+  recorder.start();
+  recStart = Date.now();
+  recorder._timer = setInterval(() => {
+    const s = Math.floor((Date.now() - recStart) / 1000);
+    $('recTime').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }, 250);
+  $('recTime').textContent = '0:00';
+  $('stage').classList.add('recording'); $('rec').textContent = 'Stop';
+};
+
+// ---------- wiring ----------
+$('effects').innerHTML = Object.keys(EFFECTS).map((k) =>
+  `<button data-fx="${k}" class="${k === effect ? 'active' : ''}">${k}</button>`).join('');
+$('effects').onclick = (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  effect = b.dataset.fx;
+  $('effects').querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+};
+
+$('toggle').onclick = () => (stream ? (stop(), setStatus('Camera is off.')) : start($('device').value || undefined));
+$('device').onchange = () => stream && start($('device').value);
+$('res').onchange = () => stream && start($('device').value);
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space' && stream) { e.preventDefault(); $('snap').click(); }
+  if (e.key === 'r' && stream) $('rec').click();
+  if (e.key === 'm') $('mirror').click();
+});
+
+if (!navigator.mediaDevices?.getUserMedia) setStatus('This browser has no camera API (or the page isn’t on https/localhost).', true);
+</script>
+</body>
+</html>
